@@ -1,0 +1,12 @@
+# trajectories/meta_swarm.yml
+name: meta_swarm
+description: swarm of swarms – each particle is itself a swarm
+kernel: meta_kernel.json   # particles = previous s(t) vectors
+
+trajectory:
+  - op: reset
+  - op: load_particles     # each particle = previous Cortex layer
+    shards: 5
+  - op: converge
+  - op: feedback
+    target: env.meta_embedding

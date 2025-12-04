@@ -1,0 +1,16 @@
+name = "HllSets"
+uuid = "f955276c-852f-4e19-9c8c-7b5b96acb3fc"
+authors = ["Alex Mylnikov <alexmy@lisa-park.com> and contributors"]
+version = "0.1.0"
+
+[deps]
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
+Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+

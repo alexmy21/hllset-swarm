@@ -1,0 +1,25 @@
+name: chinese_cover
+description: cover input text with minimal character overlap
+kernel: 80k_ccd.json.gz        # immutable Chinese kernel
+precision: 10                   # 1024 registers
+
+# ---- programmable swarm ----
+params:
+  alpha: 0.20        # cognitive (Wτ)
+  beta:  0.15        # exclusion (Wρ)
+  gamma: 0.05        # social
+  eta:   0.02        # Hebb update
+
+# ---- trajectory program ----
+trajectory:
+  - op: reset
+    value: 0.5
+  - op: cover        # push entry cover into swarm
+    entry: "{{ env.text }}"
+  - op: teacher      # host revision (optional)
+    source: env.revision
+  - op: converge
+    max_steps: 5
+    tol: 1e-3
+  - op: feedback
+    target: env.embedding   # write s(t+1) back
