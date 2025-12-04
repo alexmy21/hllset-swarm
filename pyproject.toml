@@ -4,4 +4,17 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "ipykernel>=7.1.0",
+    "julia>=0.6.2",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.7",
+    "memory-profiler>=0.61.0",
+    "mmh3>=5.2.0",
+    "numba>=0.62.1",
+    "numpy>=2.3.4",
+    "redis>=7.0.1",
+    "scipy>=1.16.3",
+    "torch>=2.9.1",
+    "zstandard>=0.25.0",
+]

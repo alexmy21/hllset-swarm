@@ -15,7 +15,7 @@ hllsets_path = os.getenv("HLLSETS_PATH")
 if not hllsets_path:
     # Try to find HllSets.jl relative to this file
     current_dir = Path(__file__).parent
-    hllsets_jl = current_dir / "HllSets" / "src" / "HllSets.jl"
+    hllsets_jl = current_dir / "HllSets.jl"
     
     if hllsets_jl.exists():
         hllsets_path = str(hllsets_jl)

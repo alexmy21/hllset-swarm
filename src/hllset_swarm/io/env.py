@@ -1,3 +1,18 @@
+from __future__ import annotations
+import torch
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Protocol
+    
+    class Adapter(Protocol):
+        """Protocol for environment adapters (LLM, DB, robot, etc.)"""
+        def update_embedding(self, embedding: Any) -> None:
+            ...
+
+from ..kernel import KERNEL
+
+__all__ = ["Environment", "Adapter"]
 class Environment:
     def __init__(self, text: str, adapter: Adapter):
         self.text = text
