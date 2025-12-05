@@ -257,3 +257,7 @@ MIT – see [LICENSE](LICENSE).
 ---
 
 **Star ⭐ the repo if you want Git to remember meaning for you.**
+
+## Reference
+
+1. [Check project wiki for more information](https://github.com/alexmy21/hllset-swarm/wiki)
