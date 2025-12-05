@@ -1,6 +1,5 @@
-# 🧠 HLLSet-Swarm
-
->*Programmable swarm trajectories via HLLSet–PSO duality*
+# 🧠 HLLSet-Swarm  
+*Programmable swarm trajectories via HLLSet–PSO duality*
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/uv/v/hllset_swarm)](https://pypi.org/project/hllset_swarm/)
@@ -56,7 +55,7 @@ print("embedding shape:", env.embedding.shape)  # (80000,)
 
 ## 📁 Repository layout
 
-```bash
+```
 hllset_swarm/
 ├── src/hllset_swarm/
 │   ├── kernel.py          # immutable Chinese-character HLLSets
@@ -81,13 +80,11 @@ hllset_swarm/
 ## 🛠️ Installation
 
 ### Using `uv` (fastest)
-
 ```bash
 uv add hllset_swarm
 ```
 
 ### From source
-
 ```bash
 git clone https://github.com/yourname/hllset_swarm.git
 cd hllset_swarm
@@ -95,7 +92,6 @@ uv add -e .
 ```
 
 ### Julia dependency (only for HLLSet backend)
-
 ```bash
 # one-liner installer
 curl -fsSL https://install.julialang.org | sh
@@ -106,7 +102,7 @@ julia -e 'using Pkg; Pkg.add("HllSets")'
 
 ## 🎯 Concepts in one picture
 
-```text
+```
 Chinese text
      │
      ▼
@@ -121,7 +117,6 @@ Environment  ◄──feedback──  Github commit  ◄──layer blob──�
 ## 📝 Writing a trajectory
 
 `trajectories/default.yml`
-
 ```yaml
 name: chinese_cover
 kernel: 80k_ccd.json.gz
@@ -136,16 +131,16 @@ params:
 trajectory:
   - op: reset
     value: 0.5
-  - op: cover
+  - op: cover        # push entry cover into swarm
     entry: "{{ env.text }}"
   - op: converge
     max_steps: 5
+    tol: 1e-3
   - op: feedback
-    target: env.embedding
+    target: env.embedding   # write s(t+1) back
 ```
 
 Run it:
-
 ```python
 prog = SwarmProgram.from_yaml("trajectories/default.yml")
 prog.run(env)
@@ -163,20 +158,11 @@ prog.run(env)
 | `StdoutAdapter` | debug JSON to console |
 
 Add your own:
-
 ```python
 from hllset_swarm.io import BaseAdapter
 class MyAdapter(BaseAdapter):
     def update_embedding(self, vec: np.ndarray):
         requests.post("http://my.api/embedding", data=vec.tobytes())
-```
-
----
-
-## 🧪 Tests
-
-```bash
-uv run pytest tests/
 ```
 
 ---
@@ -202,6 +188,43 @@ uv run pytest tests/
 
 ---
 
+## 🧪 Tests
+
+```bash
+uv run pytest tests/
+```
+
+---
+
+## 🚦 Roadmap
+
+| Month | Milestone | Status |
+|---|---|---|
+| **November 2025** | ✅ **PoC on 300-char dictionary** | DONE |
+| **November 2025** | ✅ **Julia backend + GPU kernels** | DONE |
+| **December 2025** | **Goal: 80 k kernel + sparse lattice** | 🚧  |
+| **December 2025** | **Goal: programmable YAML trajectories** | 📋 |
+| **January 2026** | **Goal: Git-commit cortex layers** | 📋 |
+| **January 2026** | **Goal: environment adapters (LLM, DB, ROS)** | 📋 |
+| **January 2026** | **Goal: first kibbutz (3-node collective)** | 🎯 |
+
+---
+
+### 🔭 Next giant leap – **SGS.ai Kibbutz**
+
+> “The same maths that describes birds finding food describes bits finding meaning.”  
+> We now let **those bits farm together**.
+
+| Kibbutz Feature | Description | Target Date |
+|---|---|---|
+| **Radical sharding** | conflict-free parallel farming | Jan 2026 |
+| **CRDT consensus** | arithmetic-mean lattice merge | Feb 2026 |
+| **Host-score income** | Hebb burn proportional to BLEU/RLHF | Q1 2026 |
+| **Elastic scale** | join/leave without downtime | Q1 2026 |
+| **Cross-domain kibbutz** | Chinese + Arabic + English swarms | Q2 2026 |
+
+---
+
 ## 🤝 Contributing
 
 1. Fork  
@@ -219,8 +242,8 @@ We love **new adapters** and **trajectory recipes**!
 @software{hllset_swarm,
   title = {HLLSet-Swarm: Programmable Swarm Trajectories via HLLSet--PSO Duality},
   author = {Your Name},
-  url = {https://github.com/alexmy21/hllset-swarm},
-  year = {2024}
+  url = {https://github.com/alexmy21/hllset_swarm},
+  year = {2025}
 }
 ```
 
