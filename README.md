@@ -242,7 +242,7 @@ We love **new adapters** and **trajectory recipes**!
 ```bibtex
 @software{hllset_swarm,
   title = {HLLSet-Swarm: Programmable Swarm Trajectories via HLLSet--PSO Duality},
-  author = {Your Name},
+  author = {Alex Mylnikov, Aleksandr Solonin},
   url = {https://github.com/alexmy21/hllset_swarm},
   year = {2025}
 }
