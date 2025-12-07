@@ -1,5 +1,6 @@
-# 🧠 HLLSet-Swarm  
-*Programmable swarm trajectories via HLLSet–PSO duality*
+# 🧠 HLLSet-Swarm
+
+>*Programmable swarm trajectories via HLLSet–PSO duality*
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/uv/v/hllset_swarm)](https://pypi.org/project/hllset_swarm/)
@@ -12,7 +13,7 @@
 HLLSet-Swarm turns the **mathematical duality** between
 
   - *(a) relational algebra of Chinese-character HLLSets* and  
-  - *(b) Particle-Swarm Optimisation dynamics*  
+  - *(b) Particle-Swarm Optimization dynamics*  
 
 into a **declarative GPU kernel compiler** that lets you **script** how a 80 k-dimensional “semantic swarm” should move, converge and **write its final state back** to any external system (LLM, DB, robot, …) as **live feedback**.
 
@@ -36,7 +37,7 @@ Think *“Git for meaning”* – every trajectory ends with a content-addressed
 ## ⚡ 30-second demo
 
 ```bash
-git clone https://github.com/yourname/hllset_swarm.git
+git clone https://github.com/alexmy21/hllset_swarm.git
 cd hllset_swarm
 uv add -e .
 export GITHUB_TOKEN="ghp_xxx"
@@ -56,7 +57,7 @@ print("embedding shape:", env.embedding.shape)  # (80000,)
 
 ## 📁 Repository layout
 
-```
+```bash
 hllset_swarm/
 ├── src/hllset_swarm/
 │   ├── kernel.py          # immutable Chinese-character HLLSets
@@ -81,11 +82,13 @@ hllset_swarm/
 ## 🛠️ Installation
 
 ### Using `uv` (fastest)
+
 ```bash
 uv add hllset_swarm
 ```
 
 ### From source
+
 ```bash
 git clone https://github.com/yourname/hllset_swarm.git
 cd hllset_swarm
@@ -93,6 +96,7 @@ uv add -e .
 ```
 
 ### Julia dependency (only for HLLSet backend)
+
 ```bash
 # one-liner installer
 curl -fsSL https://install.julialang.org | sh
@@ -103,13 +107,13 @@ julia -e 'using Pkg; Pkg.add("HllSets")'
 
 ## 🎯 Concepts in one picture
 
-```
+```text
 Chinese text
      │
      ▼
 [HLLSet cover]  ──BSS τ-ρ──►  GPU SwarmState  ──converge──►  s(t+1)
      ▲                                                    │
-     │              PSO-HLLSet duality                   ▼
+     │              PSO-HLLSet duality                    ▼
 Environment  ◄──feedback──  Github commit  ◄──layer blob──┘
 ```
 
@@ -118,6 +122,7 @@ Environment  ◄──feedback──  Github commit  ◄──layer blob──�
 ## 📝 Writing a trajectory
 
 `trajectories/default.yml`
+
 ```yaml
 name: chinese_cover
 kernel: 80k_ccd.json.gz
@@ -142,10 +147,40 @@ trajectory:
 ```
 
 Run it:
+
 ```python
 prog = SwarmProgram.from_yaml("trajectories/default.yml")
 prog.run(env)
 ```
+
+---
+
+## 🎲 Controlled noise – low-precision hash as regulariser
+
+| Precision | Collision rate | Use-case | Noise role |
+|---|---|---|---|
+| **64 bit** | < 0.1 % | production Chinese | almost deterministic |
+| **32 bit** | ≈ 1 % | mobile emoji | **mild regulariser** |
+| **16 bit** | ≈ 6 % | MCU controller | **strong regulariser** |
+| **8 bit** | ≈ 30 % | toy demos | **extreme dropout** |
+
+**Interpretation**:
+
+- **High collision** = **bit-dropout** → union **looks bigger** than reality.  
+- **Multi-seed triangulation** = **denoising U-Net** → recover **true cover**.
+
+---
+
+## 🧠 Denoising analogy (vision → semantics)
+
+| Vision pipeline | Semantic pipeline |
+|---|---|
+| **Gaussian noise** | **hash collision dropout** |
+| **Noisy image** | **noisy HLLSet union** |
+| **U-Net denoiser** | **multi-seed Hopfield descent** |
+| **Clean image** | **disambiguated cover** |
+
+**Same math**, **different substrate**.
 
 ---
 
@@ -159,6 +194,7 @@ prog.run(env)
 | `StdoutAdapter` | debug JSON to console |
 
 Add your own:
+
 ```python
 from hllset_swarm.io import BaseAdapter
 class MyAdapter(BaseAdapter):
@@ -311,3 +347,5 @@ MIT – see [LICENSE](LICENSE).
 ## Reference
 
 1. [Check project wiki for more information](https://github.com/alexmy21/hllset-swarm/wiki)
+2. [U-Net](https://arxiv.org/pdf/1505.04597)
+3. [U-Net medium](https://medium.com/@keremturgutlu/semantic-segmentation-u-net-part-1-d8d6f6005066)
