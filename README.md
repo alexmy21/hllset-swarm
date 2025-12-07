@@ -226,6 +226,56 @@ uv run pytest tests/
 
 ---
 
+## 🌍 Beyond Chinese – any *"hieroglyphic"* substrate
+
+Chinese is **our first substrate** because it is **optimally hieroglyphic**:
+
+- finite, standardised inventory (≈ 80 k)  
+- unambiguous dictionary definitions **in the same language**  
+- clear **radical→character→word** composition rules  
+- 3 000 years of **continuous semantic fossil record**
+
+But the **mathematics is substrate-agnostic**.  
+Any symbol set that satisfies **four axioms** can be dropped in:
+
+1. **Non-inflectional** (no paradigms, no declensions)  
+2. **Compositionally closed** (complex = stack of simples)  
+3. **Lexicographically frozen** (each symbol has **one** normative definition)  
+4. **Hashable** (deterministic bit-pattern from symbol)
+
+---
+
+### 🧪 Substrates on the roadmap
+
+| Substrate | Inventory | Composition unit | Status | ETA |
+|---|---|---|---|---|
+| **Chinese (CCD)** | 80 k chars | radical | ✅ reference | now |
+| **Classic Maya glyphs** | 1 100 glyphs | block | 🚧 POC | Q4 2025 |
+| **Emoji 15.1** | 3 782 emojis | ZWJ sequence | 📋 design | Q1 2026 |
+| **Minecraft blocks** | 1 500 blocks | voxel neighbour | 📋 design | Q1 2026 |
+| **AI Esperanto** | 10 k morphemes | concat-rule | 📋 white-paper | Q2 2026 |
+
+---
+
+### 🕹️ Example – Minecraft substrate (sketch)
+
+```yaml
+substrate: minecraft
+inventory: minecraft_blocks.json.gz
+precision: 12          # 4096 registers
+hash_seed: "mc1.20.1"
+composition_rule: "6-face-voxel+up/down"
+definition_source: "block_state.properties"
+```
+
+- **Block** → HLLSet hashed from **block-state NBT**  
+- **Structure** → union of block HLLSets  
+- **Scene embedding** → swarm convergence on block-cover
+
+Same YAML, same GPU kernel, **different universe**.
+
+---
+
 ## 🤝 Contributing
 
 1. Fork  
