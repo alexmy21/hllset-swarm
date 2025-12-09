@@ -155,7 +155,7 @@ prog.run(env)
 
 ---
 
-## 🎲 Controlled noise – low-precision hash as regulariser
+## 🎲 Controlled noise – low-precision hash as regularizer
 
 | Precision | Collision rate | Use-case | Noise role |
 |---|---|---|---|
@@ -349,3 +349,5 @@ MIT – see [LICENSE](LICENSE).
 1. [Check project wiki for more information](https://github.com/alexmy21/hllset-swarm/wiki)
 2. [U-Net](https://arxiv.org/pdf/1505.04597)
 3. [U-Net medium](https://medium.com/@keremturgutlu/semantic-segmentation-u-net-part-1-d8d6f6005066)
+4. [Kalman Filters in Python](https://medium.com/@ccpythonprogramming/particle-filters-in-python-when-kalman-filters-break-down-75d51550ee15)
+5. [Umbral Calculus](https://www.cantorsparadise.com/the-dark-art-of-umbral-calculus-976959da72ca)
