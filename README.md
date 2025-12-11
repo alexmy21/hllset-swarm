@@ -351,3 +351,6 @@ MIT – see [LICENSE](LICENSE).
 3. [U-Net medium](https://medium.com/@keremturgutlu/semantic-segmentation-u-net-part-1-d8d6f6005066)
 4. [Kalman Filters in Python](https://medium.com/@ccpythonprogramming/particle-filters-in-python-when-kalman-filters-break-down-75d51550ee15)
 5. [Umbral Calculus](https://www.cantorsparadise.com/the-dark-art-of-umbral-calculus-976959da72ca)
+6. [Bell: The Theorem That Proved Einstein Wrong](https://medium.com/@manaritaa/coffee-with-bell-the-theorem-that-proved-einstein-wrong-cddc77522885)
+7. [Less is More: Recursive Reasoning with Tiny Networks](https://arxiv.org/pdf/2510.04871)
+8. [BLEU](https://en.wikipedia.org/wiki/BLEU)
