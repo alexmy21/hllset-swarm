@@ -344,7 +344,7 @@ MIT – see [LICENSE](LICENSE).
 
 **Star ⭐ the repo if you want Git to remember meaning for you.**
 
-## Reference
+## References
 
 1. [Check project wiki for more information](https://github.com/alexmy21/hllset-swarm/wiki)
 2. [U-Net](https://arxiv.org/pdf/1505.04597)
@@ -354,3 +354,4 @@ MIT – see [LICENSE](LICENSE).
 6. [Bell: The Theorem That Proved Einstein Wrong](https://medium.com/@manaritaa/coffee-with-bell-the-theorem-that-proved-einstein-wrong-cddc77522885)
 7. [Less is More: Recursive Reasoning with Tiny Networks](https://arxiv.org/pdf/2510.04871)
 8. [BLEU](https://en.wikipedia.org/wiki/BLEU)
+9. [PyTorch Frame](https://abishpius.medium.com/easy-deep-learning-for-tabular-data-trompt-code-example-included-bf17cd00f543)
