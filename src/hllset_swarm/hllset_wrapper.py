@@ -6,7 +6,7 @@ Provides BSS_τ (coverage) and BSS_ρ (exclusion) metrics for set operations.
 from julia import Main
 import os
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from dataclasses import dataclass
 
 # Auto-detect HllSets.jl path if not set
@@ -29,19 +29,25 @@ Main.include(hllsets_path)
 Main.using(".HllSets")
 
 
-# if not hllsets_path:
-#     raise EnvironmentError("HLLSETS_PATH environment variable is not set")
-
-# # Load the HllSets.jl file
-# Main.include(hllsets_path)
-# Main.using(".HllSets")
-
-
 @dataclass
 class BSSMetrics:
     """BSS metrics for HllSet operations."""
     tau: float  # Coverage: |A∩B| / |B|
     rho: float  # Exclusion: |A∖B| / |B|
+
+
+@dataclass
+class HllHashInfo:
+    """Hash information returned by add! operation."""
+    token: Any       # Original element/token
+    hash_value: int  # Full hash value
+    bin: int         # Register/bin number (reg_num)
+    idx: int         # Run of zeros (run_zero)
+    
+    @property
+    def hll_pair(self) -> Tuple[int, int]:
+        """Return (reg_num, run_zero) pair for LUT integration."""
+        return (self.bin, self.idx)
 
 
 class HllSet:
@@ -68,16 +74,44 @@ class HllSet:
         self.seed = seed
         self.hll = Main.HllSet(P)  # Create a new HllSet in Julia
 
-    def add(self, element: Any) -> None:
-        """Add an element to the HllSet."""
+    def add(self, element: Any) -> HllHashInfo:
+        """
+        Add an element to the HllSet and return hash information.
+        
+        Args:
+            element: Element to add
+            
+        Returns:
+            HllHashInfo containing hash value, bin, and idx
+        """
         add_func = getattr(Main, "add!")
-        add_func(self.hll, element)
+        token, h, bin, idx = add_func(self.hll, element, seed=self.seed)
+        return HllHashInfo(token=token, hash_value=int(h), bin=int(bin), idx=int(idx))
 
-    def add_batch(self, elements: list) -> None:
-        """Add a batch of elements to the HllSet."""
+    def add_batch(self, elements: list) -> List[HllHashInfo]:
+        """
+        Add a batch of elements to the HllSet and return their hash information.
+        
+        Args:
+            elements: List of elements to add
+            
+        Returns:
+            List of HllHashInfo for each added element
+        """
         add_func = getattr(Main, "add!")
+        results = []
         for element in elements:
-            add_func(self.hll, element)
+            token, h, bin, idx = add_func(self.hll, element, seed=self.seed)
+            results.append(HllHashInfo(token=token, hash_value=int(h), bin=int(bin), idx=int(idx)))
+        return results
+
+    def add_with_hash(self, element: Any) -> Tuple[HllHashInfo, None]:
+        """
+        Add an element and return its hash info (alias for add).
+        
+        Deprecated: Use add() directly.
+        """
+        return self.add(element), None
 
     def count(self) -> float:
         """Estimate the cardinality of the HllSet."""

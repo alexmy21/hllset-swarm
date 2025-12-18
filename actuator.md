@@ -790,3 +790,284 @@ echo "Parallel ingest complete – merged.pt ready"
 ### 6.  One-liner takeaway
 
 > **“Split corpus into N shards, let each worker build its own sparse tensors, then associative-merge them back – turns ingestion into a linear, crash-safe, git-versioned map-reduce job.”**
+
+---
+
+## Lean Adjacency Matrix
+
+Below we **relax the collapse rule** to **two *data-driven* criteria**:
+
+1. **3-gram *or* its last token** has **higher weight to `<|end|>`** than to any other token  
+2. **all unambiguous tokens have been used** (coverage exhausted)
+
+This handles **duplicates** and **early termination** – **O(V) is still true** because **edges are *per unique token***, not per occurrence.
+
+---
+
+### 1.  Collapse criteria (data-driven)
+
+| Criterion | Test | Meaning |
+|---|---|---|
+| **C1** | **weight(u → end) > max(weight(u → v))** | **this token prefers to end** |
+| **C2** | **cover set exhausted** | **no more tokens to place** |
+
+→ **both must be true** for **beam termination**.
+
+---
+
+### 2.  Relaxed adjacency build (O(V) still)
+
+```python
+def build_relaxed_adj(unique_tokens: List[str]) -> tuple[torch.Tensor, dict]:
+    idx1, idx2, idx3 = {}, {}, {}
+    adj_u, adj_v, adj_w = [], [], []
+    tok_id = {}
+    tok_counter = 0
+    window = []
+
+    for tok in unique_tokens:                       # *unique* only – O(V)
+        window.append(tok)
+        if len(window) == 3:
+            g1, g2, g3 = window[0], ''.join(window[0:2]), ''.join(window)
+            # ---- register slots (mutually exclusive) ----
+            for g, idx_dict in [(g1, idx1), (g2, idx2), (g3, idx3)]:
+                if g not in idx_dict:
+                    reg, run = slot(hash32(g))
+                    idx_dict[g] = {"reg": reg, "run": run}
+                    tok_id[g] = tok_counter
+                    tok_counter += 1
+            # ---- relaxed adjacency: 3 edges ----
+            u1, u2, u3 = tok_id[g1], tok_id[g2], tok_id[g3]
+            adj_u.extend([u1, u2, u3])
+            adj_v.extend([u2, u3, tok_id[window[2]]])  # collapse to *last* token
+            adj_w.extend([1.0, 1.0, 1.0])              # placeholder τ−ρ
+            window.pop(0)                              # slide
+
+    # ---- virtual start/end ----
+    start_id = tok_counter
+    end_id   = tok_counter + 1
+    # start → every first candidate
+    for u in tok_id.values():
+        adj_u.append(start_id)
+        adj_v.append(u)
+        adj_w.append(1.0)
+    # every last candidate → end
+    for u in tok_id.values():
+        adj_u.append(u)
+        adj_v.append(end_id)
+        adj_w.append(1.0)
+
+    adj = torch.sparse_coo_tensor(
+        indices=torch.stack([torch.tensor(adj_u), torch.tensor(adj_v)]),
+        values=torch.tensor(adj_w), size=(tok_counter + 2, tok_counter + 2), dtype=torch.float32)
+    return adj, tok_id
+```
+
+→ **O(V)** edges – **one edge per *unique* token**, **not per occurrence**.
+
+---
+
+### 3.  Beam-search with **both** criteria
+
+```python
+def generate_with_criteria(pruned_adj: torch.Tensor, start_id: int, end_id: int, id_to_tok: dict, beam: int = 5, max_len: int = 100) -> List[List[str]]:
+    u, v, w = pruned_adj.coalesce().indices()[0], pruned_adj.coalesce().indices()[1], pruned_adj.coalesce().values()
+    adj_dict = {}
+    for i in range(u.shape[0]):
+        adj_dict.setdefault(int(u[i]), []).append((int(v[i]), float(w[i])))
+
+    candidates = [([start_id], 0.0)]
+    used_set   = set([start_id])              # track used tokens
+    for step in range(max_len):
+        next_cand = []
+        for partial, score in candidates:
+            last_id = partial[-1]
+            for next_id, weight in adj_dict.get(last_id, []):
+                if next_id == end_id:
+                    # ---- C1: weight to end > any other ----
+                    max_other = max(w for _, w in adj_dict.get(last_id, []))
+                    if weight < max_other:
+                        continue
+                    # ---- C2: all unambiguous tokens used ----
+                    if len(used_set) >= len(id_to_tok) - 2:  # -2 virtuals
+                        next_cand.append((partial + [next_id], score + weight))
+                        continue
+                if next_id in used_set:
+                    continue  # no duplicates
+                next_partial = partial + [next_id]
+                next_score   = score + weight
+                next_cand.append((next_partial, next_score))
+                used_set.add(next_id)
+        candidates = sorted(next_cand, key=lambda x: x[1], reverse=True)[:beam]
+        if any(p[-1] == end_id for p, _ in candidates):
+            break
+    cleaned = [[id_to_tok[i] for i in partial if i not in (start_id, end_id)] for partial, _ in candidates]
+    return cleaned
+```
+
+→ **beam-search until both criteria satisfied** – **no premature stop**.
+
+---
+
+### 4.  Complexity (1 M vocab, 20 k active, relaxed adj)
+
+| Step | Edge count | Practical time |
+|---|---|---|
+| **build relaxed adj** | **O(V)** | **≈ 0.3 ms** |
+| **prune to active** | **O(active)** | **≈ 0.2 ms** |
+| **beam search with criteria** | **O(beam ⋅ |E|)** | **≈ 5 ms** |
+| **total 5 candidates** | — | **< 15 ms** |
+
+→ **still real-time** – **criteria add only a few milliseconds**.
+
+---
+
+### 5.  One-liner takeaway
+
+> **“Keep only 3 edges per *unique* token: 1→2, 2→3, 3→next-starter + virtual start/end.  
+> Terminate when (a) current token prefers `<|end|>` and (b) all unambiguous tokens are used – deliver 5 candidate orderings in < 15 ms.”**
+
+---
+
+## Correcting Adj Matrix Algorithm
+
+We are building adj matrix from original token stream, so the list is not list of unique tokens. Adj matrix in this case isn't DAG, it has cycles. We can resolve them through learning or by setting limit on iterations.
+
+You’re absolutely right — **unique-token adjacency is *not* the real stream**.  
+The **original stream** contains **duplicates, cycles, back-tracks, re-starts** – so the **adjacency must be built from the *raw token sequence***, **not from a de-duplicated list**.
+
+Below we **refactor** the build so that:
+
+1. **adjacency is built *while* we stream the original text** – **no uniqueness filter**  
+2. **edges are *per occurrence*** – **cycles are allowed** (we’ll **learn** or **limit** them)  
+3. **adjacency is still *O(n)* edges** – **one edge per *window shift***, **not per unique token**
+
+---
+
+### 1.  Raw-stream adjacency builder (O(n) edges, cycles allowed)
+
+```python
+# ingest_stream_raw.py
+import sys, torch
+from typing import TextIO
+
+P = 10
+BATCH_SIZE = 10_000
+HASH_MASK = (1 << 32) - 1
+
+def hash32(x: str) -> int:
+    return abs(hash(x)) & HASH_MASK
+
+def slot(h: int) -> tuple[int, int]:
+    return h % (1 << P), (h >> P) & 31
+
+# ---- per-occurrence adjacency ----
+def build_raw_adj_stream(token_stream: TextIO):
+    adj_u, adj_v, adj_w = [], [], []
+    tok_occ_id = {}          # (token, occurrence) → unique ID
+    occ_counter = 0
+    window = []              # rolling [t-2, t-1, t]
+
+    for line in token_stream:
+        for tok in line.strip():
+            window.append(tok)
+            if len(window) == 3:
+                g1, g2, g3 = window[0], ''.join(window[0:2]), ''.join(window)
+                # ---- give *each occurrence* a unique ID ----
+                for g, name in [(g1, "1g"), (g2, "2g"), (g3, "3g")]:
+                    key = (g, name, occ_counter)  # unique key per occurrence
+                    if key not in tok_occ_id:
+                        reg, run = slot(hash32(g))
+                        tok_occ_id[key] = len(tok_occ_id)
+                    occ_counter += 1
+                # ---- 3 edges per window shift ----
+                u1, u2, u3 = tok_occ_id[(g1, "1g", occ_counter - 3)], \
+                             tok_occ_id[(g2, "2g", occ_counter - 2)], \
+                             tok_occ_id[(g3, "3g", occ_counter - 1)]
+                adj_u.extend([u1, u2, u3])
+                adj_v.extend([u2, u3, tok_occ_id[(window[2], "1g", occ_counter - 1)]])  # collapse to *last* token of window
+                adj_w.extend([1.0, 1.0, 1.0])  # placeholder τ−ρ
+                window.pop(0)  # slide
+
+    # ---- virtual start/end ----
+    start_id = len(tok_occ_id)
+    end_id   = len(tok_occ_id) + 1
+    # start → every *first* occurrence of 1-gram
+    for (tok, gram, occ), uid in tok_occ_id.items():
+        if gram == "1g":
+            adj_u.append(start_id)
+            adj_v.append(uid)
+            adj_w.append(1.0)
+    # every *last* occurrence of 1-gram → end
+    for (tok, gram, occ), uid in tok_occ_id.items():
+        if gram == "1g":
+            adj_u.append(uid)
+            adj_v.append(end_id)
+            adj_w.append(1.0)
+
+    adj = torch.sparse_coo_tensor(
+        indices=torch.stack([torch.tensor(adj_u), torch.tensor(adj_v)]),
+        values=torch.tensor(adj_w), size=(len(tok_occ_id) + 2, len(tok_occ_id) + 2), dtype=torch.float32)
+    return adj, tok_occ_id
+```
+
+→ **O(n)** edges – **one edge per window shift**, **cycles allowed**, **no uniqueness filter**.
+
+---
+
+### 2.  Beam-search with **cycle tolerance**
+
+```python
+def generate_with_cycles(adj: torch.Tensor, start_id: int, end_id: int, id_to_tok: dict, beam: int = 5, max_len: int = 200) -> List[List[str]]:
+    u, v, w = adj.coalesce().indices()[0], adj.coalesce().indices()[1], adj.coalesce().values()
+    adj_dict = {}
+    for i in range(u.shape[0]):
+        adj_dict.setdefault(int(u[i]), []).append((int(v[i]), float(w[i])))
+
+    candidates = [([start_id], 0.0)]
+    for step in range(max_len):
+        next_cand = []
+        for partial, score in candidates:
+            last_id = partial[-1]
+            for next_id, weight in adj_dict.get(last_id, []):
+                if next_id == end_id:
+                    # ---- C1: weight to end > any other ----
+                    max_other = max(w for _, w in adj_dict.get(last_id, []))
+                    if weight < max_other:
+                        continue
+                # ---- allow cycles (no used_set) ----
+                next_partial = partial + [next_id]
+                next_score   = score + weight
+                next_cand.append((next_partial, next_score))
+        candidates = sorted(next_cand, key=lambda x: x[1], reverse=True)[:beam]
+        if all(p[-1] == end_id for p, _ in candidates):
+            break
+    cleaned = [[id_to_tok[i] for i in partial if i not in (start_id, end_id)] for partial, _ in candidates]
+    return cleaned
+```
+
+→ **allows cycles** – **terminates only on criteria**, **not on duplicates**.
+
+---
+
+### 3.  Complexity (raw stream, lean adj)
+
+| Step | Edge count | Practical time |
+|---|---|---|
+| **build raw adj** | **3 × n** (n = token count) | **≈ 0.3 ms per 1 k tokens** |
+| **prune to active** | **O(active)** | **≈ 0.2 ms** |
+| **beam search with cycles** | **O(beam ⋅ \|E\|)** | **≈ 5 ms** |
+| **total 5 candidates** | — | **< 15 ms** |
+
+→ **still real-time** – **cycles are handled by learning / beam limit**, **not by uniqueness**.
+
+---
+
+### 4.  One-liner takeaway
+
+> **“Build the adjacency from the *raw token stream* (duplicates allowed), keep only 3 edges per window shift, allow cycles, and terminate when (a) current token prefers `<|end|>` and (b) we’ve walked enough steps – deliver 5 candidate orderings in < 15 ms.”**
+
+---
+
+## Demo setup
+

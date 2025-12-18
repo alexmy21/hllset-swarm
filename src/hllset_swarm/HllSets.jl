@@ -62,27 +62,42 @@ module HllSets
 
     # Core HLL Operations --------------------------------------------------------
 
-    """
-        add!(hll::HllSet{P}, x::Any; seed::Int=0)
+    # Core HLL Operations --------------------------------------------------------
 
-    Add an element to the HLL set.
+    """
+    add!(hll::HllSet{P}, x::Any; seed::Int=0)
+
+    Add an element to the HLL set and return hash information.
+
+    Returns:
+    (h, bin, idx) - tuple of hash value, bin number, and zero run length
     """
     function add!(hll::HllSet{P}, x::Any; seed::Int = 0) where {P}
-        # println("seed = ", seed, "; P = ", P, "; x = ", x)
         h = u_hash(x; seed=seed)
-        # println("hash = ", h)
         bin = getbin(hll, h)
         idx = getzeros(hll, h)
         if idx <= 32
             hll.counts[bin] |= (1 << (idx - 1))
         end
+        return (x, h, bin, idx)
     end
 
+    """
+    add!(hll::HllSet{P}, values::Union{Set, Vector}; seed::Int=0)
+
+    Add multiple elements to the HLL set and return their hash information.
+
+    Returns:
+    Vector of (h, bin, idx) tuples for each added element
+    """
     function add!(hll::HllSet{P}, values::Union{Set, Vector}; seed::Int = 0) where {P}
+        results = Vector{Tuple{Any, Int, Int, Int}}()
         for value in values
-            add!(hll, value, seed=seed)
+            result = add!(hll, value, seed=seed)
+            push!(results, result)
         end
-    end    
+        return results
+    end
 
     # Helper Functions ----------------------------------------------------------
 
