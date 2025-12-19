@@ -82,7 +82,7 @@ class HllSet:
             element: Element to add
             
         Returns:
-            HllHashInfo containing hash value, bin, and idx
+            HllHashInfo containing token, hash value, bin, and idx
         """
         add_func = getattr(Main, "add!")
         token, h, bin, idx = add_func(self.hll, element, seed=self.seed)
