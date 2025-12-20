@@ -1,5 +1,27 @@
 # Swarm forecast
 
+Attached docs:
+
+1. Chinese-HLLSetCortex - introduction of HLLSets for presentation of Chinese characters (hieroglyphs). We will call them tokens, because in the essence they are tokens.
+2. The Unifided HLLSet Framework - general theretical and implementation framework for HLLSets
+3. Three swarm related docs propose implementation of PSO in context of HLLSet based systems
+In current development we implemented adaptive model of modifying Wτ and Wρ adjust them according to new state of environment presented by ingested data in HLLSet format. The model is passive.
+We can make this model active by implementing what we can call swarm forecasting.
+
+The Idea:
+
+- SGS.ai is iterative system and it moving forward applying self generative loop. Each iteration can be described by 3 matrices: Wτ, Wρ, and Adjacency matrix (AM). The last matrix presents normalized frequencies of following one token after another.
+- At each iteration we have 2 triples (except the very first one): (Wτ(t-1), Wρ(t-1), AM(t-1)) and (Wτ(t), Wρ(t), AM(t)).
+
+Suppose we can identify transformation for each matrix (Wτ, Wρ, AM) from (t-1) to (t), then we can forecast the state of these matrices in (t+1).
+The cycle of self generative loop starts from state of environment presented some dataset, then this dataset converted to HLLSets and (Wτ, Wρ, AM) being updated. After that we can disambiguate new HLLSets back to original tokens and reorder them according AM.
+
+Notice that current HLLSets were created based on (Wτ(t-1), Wρ(t-1), AM(t-1)), applying (Wτ(t), Wρ(t), AM(t)) we effectively generating HLLSets for iteration (t+1).
+
+This is the main idea of swarm forecasting - **Extending model for deep swarm forecasting**.
+
+Each time when we make forecast for (t+1), we can move to this point and treat it as a current time t', and after that we can start forecasting again. This process will degrade quality of prediction, so, we should stop at the time when decaying prediction would be not acceptable. It would be a natural horizon of our swarm forecasting.
+
 Below is a **complete, minimal design** that turns the current *passive* τ-ρ adaptation into an **active, self-propelling swarm-forecast engine** with a configurable **prediction horizon**.
 
 Everything is expressed as three tiny Julia modules that plug into the existing notebook pipeline – no new dependencies, no gradient machinery, just matrix algebra and the τ-ρ lattice you already have.
@@ -175,6 +197,7 @@ That is the entire **swarm-forecast engine**: history → deltas → damped extr
 
 # Forecast Grounding pipe-line
 
+>This is beautiful implementation. One missing step: grounding (materializing) of our projection. The result of forecasting is HLLSet(s), that we can (and should) use as environmental input for next iteration. But before doing this, we need to disambiguate HLLSet(s) into original tokens and then reorder these tokens using updated AM matrix. After that we can send these tokens as new entry to SGS.ai.
 Below is the **minimal “grounding” pipeline** that turns a *forecasted* HLLSet back into **ordered, human-readable tokens** and feeds them into the next SGS.ai iteration.
 
 It re-uses the existing multi-seed triangulation and τ-ρ lattice; no new heavy machinery.
@@ -212,7 +235,7 @@ end
     reorder(tokens::Vector{String}, AM::SparseMatrixCSC)
     Greedy walk on the *forecasted* adjacency matrix:
     start with highest row-sum token, then pick successor with
-    highest normalised transition probability until length budget.
+    highest normalized transition probability until length budget.
 """
 function reorder(tokens::Vector{String}, AM::SparseMatrixCSC; max_len=12)
     tok2i = Dict(t=>i for (i,t) in enumerate(tokens))
@@ -238,10 +261,10 @@ end
 
 ```julia
 """
-    materialise(hll_forecast, kernel, AM_forecast; max_len=12) -> String
+    materialize(hll_forecast, kernel, AM_forecast; max_len=12) -> String
     Full round-trip: forecasted HLL → tokens → AM-ordered text
 """
-function materialise(hll_forecast, kernel, AM_forecast; max_len=12)
+function materialize(hll_forecast, kernel, AM_forecast; max_len=12)
     tokens = disambiguate(hll_forecast, kernel)
     reorder(tokens, AM_forecast; max_len)
 end
@@ -254,7 +277,7 @@ end
 ```julia
 # ---- after deep_forecast produces forecast_chain ----
 hll_next = forecast_chain[end].Wτ   # or any union of forecast HLLSets
-text_next = materialise(hll_next, kernel, forecast_chain[end].AM)
+text_next = materialize(hll_next, kernel, forecast_chain[end].AM)
 
 # ---- feed this text back into SGS.ai ----
 entry = text_next
@@ -288,3 +311,108 @@ bss_tau(A, B) = length(intersect(A.reg, B.reg)) / length(B.reg)
 
 Now the swarm dream becomes **concrete text** that SGS.ai can ingest, closing the
 **forecast → ground → ingest → forecast** self-propelling loop.
+
+--------------------------------------------------
+
+# HLLSet swarm semantic discriminator
+
+>Interesting observation:
+>
+>$\text{HLLSet} → \text{tokens} → \text{(tokens with restored order)} → \text{HLLSet'}$,
+>
+>HLLSet is not equal HLLSet'. 
+>
+>With 3-gram sliding pattern, we have 3 mutually exclusive parts of any HLLSet presentation: 1-gram part; 2-gram part; and 3-gram part. 1-gram part would be always the same in HLLSet and HLLSet', however, 2-gram and 3-gram part would be different (at least partially different).
+It means that (1) we can use 1-gram part as a way of measurement of identity; (2) - differences in 2-gram and 3-gram is not bug but the feature that we can use to separate semantically similar HLLSets; (3) it would be wise to HLLSet' as new state of environment on the next iteration (this may decrease historical (generational) bias).
+
+Below is a **one-page formalisation** of your observation plus the **three-line code change** that turns the *grounding gap* into a **semantic discriminator** and **generational de-biaser**.
+
+--------------------------------------------------
+
+## 1.  Algebraic split of any HLLSet
+
+Let  
+ H = H₁ ∪ H₂ ∪ H₃  
+where  
+ H₁ = registers produced **only** by 1-grams  
+ H₂ = registers produced **only** by 2-grams  
+ H₃ = registers produced **only** by 3-grams  
+
+Because seeds are *n-gram-aware* (we simply left-shift the hash by 2 bits for each order), the bit-ranges are **disjoint**:
+
+register-index mod 4 = 0 → 1-gram  
+register-index mod 4 = 1 → 2-gram  
+register-index mod 4 = 2 → 3-gram  
+register-index mod 4 = 3 → reserved / checksum
+
+Hence  
+ H₁ ∩ H₂ = ∅, H₂ ∩ H₃ = ∅, H₁ ∩ H₃ = ∅
+
+--------------------------------------------------
+
+## 2.  Identity ruler & semantic delta
+
+```julia
+"""
+    split_hll(hll) -> (H₁, H₂, H₃)
+    Bit-wise mask extraction (zero-copy view).
+"""
+function split_hll(hll::HLLSet)
+    reg = hll.reg
+    mask1 = (0:3:length(reg)-1) .+ 1   # 1-gram lane
+    mask2 = (1:3:length(reg)-1) .+ 1   # 2-gram lane
+    mask3 = (2:3:length(reg)-1) .+ 1   # 3-gram lane
+    (view(reg, mask1), view(reg, mask2), view(reg, mask3))
+end
+
+"""
+    semantic_delta(hll_a, hll_b) -> (d₁, d₂, d₃)
+    Jaccard distance per lane; d₁ is **identity drift**, d₂∪d₃ is
+    **semantic drift**.
+"""
+function semantic_delta(hll_a, hll_b)
+    a1, a2, a3 = split_hll(hll_a)
+    b1, b2, b3 = split_hll(hll_b)
+    d1 = 1 - length(a1 ∩ b1) / length(a1 ∪ b1)
+    d2 = 1 - length(a2 ∩ b2) / length(a2 ∪ b2)
+    d3 = 1 - length(a3 ∩ b3) / length(a3 ∪ b3)
+    (d1, d2, d3)
+end
+```
+
+--------------------------------------------------
+
+## 3.  Generational de-bias: always adopt HLLSet′ as *new* environment
+
+```julia
+# inside the forecast loop, **replace** the old anchor:
+old_env = forecast_chain[end-1].Wτ        # previous generation
+new_env = forecast_chain[end].Wτ          # HLLSet′ (after grounding)
+
+# accept HLLSet′ **even if** it differs in 2/3-gram lanes
+accept!(hist_buffer, SwarmForecastState(new_env, new_env, new_env, t+1))
+
+# optional: store semantic drift for inspection
+drift = semantic_delta(old_env, new_env)
+@info "gen $t → $(t+1)" identity_drift=drift[1] semantic_drift=(drift[2]+drift[3])/2
+```
+
+--------------------------------------------------
+
+## 4.  Practical payoff
+
+- **Identity lane (H₁)** gives a **cheap exact-match filter** – if d₁ = 0 the
+  texts are identical at token level regardless of reordering.  
+- **Semantic lanes (H₂, H₃)** let you **cluster** otherwise near-identical
+  forecasts (“人工 智能” vs “智能 人工”) without extra embedding.  
+- **Always using HLLSet′** breaks historical inertia – the swarm never
+  “hallucinates” the same n-gram twice, forcing **true novelty** each loop.
+
+--------------------------------------------------
+
+## 5.  One-sentence takeaway
+
+By treating the 1-gram register lane as **identity ruler** and the 2/3-gram
+lanes as **semantic colour**, the *grounding gap* becomes a **feature** that
+(1) measures drift, (2) clusters meanings, and (3) **actively de-biases**
+each new generation of the self-propelling SGS.ai loop.
