@@ -360,3 +360,4 @@ MIT – see [LICENSE](LICENSE).
 12. [Towards Enterprise-Ready Computer Using Generalist Agent](https://arxiv.org/pdf/2503.01861)
 13. [Probability-density-is-not-an-extension-of-probability-mass](https://medium.com/@tomkob99_89317/probability-density-is-not-an-extension-of-probability-mass-but-average-unites-them-021aba877035)
 14. [Recursive-Categorical-Framework](https://github.com/calisweetleaf/recursive-categorical-framework)
+15. [HLLSet Communication](https://chat.deepseek.com/share/w08kirq9m9mlkiidex)

@@ -63,12 +63,12 @@ class PersistentLookupTable:
         
         # Use ON CONFLICT to increment frequency
         self.conn.executemany("""
-            INSERT INTO lut (reg, run, token, hash_value, token_length, frequency)
-            VALUES (?, ?, ?, ?, ?, 1)
+            INSERT INTO lut (reg, run, token, hash_value, token_length, frequency, last_updated)
+            VALUES (?, ?, ?, ?, ?, 1, current_timestamp)
             ON CONFLICT (reg, run, token) 
             DO UPDATE SET 
                 frequency = lut.frequency + 1,
-                last_updated = NOW()
+                last_updated = excluded.last_updated
         """, batch_data)
         
         print(f"Merged {len(batch_data)} token entries into persistent LUT")
