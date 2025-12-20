@@ -361,3 +361,7 @@ MIT – see [LICENSE](LICENSE).
 13. [Probability-density-is-not-an-extension-of-probability-mass](https://medium.com/@tomkob99_89317/probability-density-is-not-an-extension-of-probability-mass-but-average-unites-them-021aba877035)
 14. [Recursive-Categorical-Framework](https://github.com/calisweetleaf/recursive-categorical-framework)
 15. [HLLSet Communication](https://chat.deepseek.com/share/w08kirq9m9mlkiidex)
+16. [Soft-NMS](https://arxiv.org/pdf/1704.04503)
+17. [RT-DETR](https://arxiv.org/pdf/2304.08069)
+18. [LETS Forecast](https://namburisrinath.medium.com/lets-forecast-learning-embedology-for-time-series-forecasting-6036891d05ae)
+19. [RF-DETR Transformer ](https://medium.com/@aedelon/yolo-is-dead-welcome-rf-detr-the-transformer-that-just-shattered-the-60-map-barrier-e814475d9f8c)
