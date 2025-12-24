@@ -4,18 +4,17 @@ import pickle
 import zstandard as zstd
 from pathlib import Path
 from typing import Dict, Tuple, List, Optional, Set
-from dataclasses import dataclass
 from collections import defaultdict
-from hllset_swarm.hllset_wrapper import HllSet, HllHashInfo
-from hllset_swarm.ingest import ingest_corpus, LookupTable
+from hllset_swarm.hllset_wrapper import HllSet
+from hllset_swarm.ingest import CorpusState, LookupTable
+
 
 class PersistentLookupTable:
-
-    """DuckDB-backed LookupTable with incremental merge support"""
+    """DuckDB-backed LookupTable with incremental append support"""
     
     def __init__(self, db_path: str = "lut.duckdb"):
-        self.db_path = db_path
-        self.conn = duckdb.connect(db_path)
+        self.db_path = str(db_path)
+        self.conn = duckdb.connect(self.db_path)
         self._create_tables()
     
     def _create_tables(self):
@@ -28,7 +27,7 @@ class PersistentLookupTable:
                 hash_value BIGINT,
                 token_length INTEGER,
                 frequency INTEGER DEFAULT 1,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_updated TIMESTAMP DEFAULT current_timestamp,
                 PRIMARY KEY (reg, run, token)
             )
         """)
@@ -40,51 +39,46 @@ class PersistentLookupTable:
             CREATE INDEX IF NOT EXISTS idx_token ON lut(token)
         """)
     
-    def merge_from_memory(self, memory_lut: 'LookupTable'):
+    def save_from_state(self, corpus_state: CorpusState):
         """
-        Merge in-memory LUT into persistent storage.
-        Updates frequency counts for existing tokens.
+        Save LUT from CorpusState to persistent storage.
+        Simplified: just append/update from current state.
         """
         batch_data = []
         
-        for (reg, run), data in memory_lut.table.items():
+        for (reg, run), data in corpus_state.lut.table.items():
             for token in data['tokens']:
-                # Get corresponding hash
                 hashes = list(data['hashes'])
                 hash_value = hashes[0] if hashes else 0
+                frequency = corpus_state.lut.token_frequency.get(token, 1)
                 
                 batch_data.append((
-                    reg, run, token, hash_value, len(token)
+                    reg, run, token, hash_value, len(token), frequency
                 ))
-
+        
         if not batch_data:
-            print("No data to merge")
+            print("No LUT data to save")
             return
         
-        # Use ON CONFLICT to increment frequency
+        # Use ON CONFLICT to update frequency
         self.conn.executemany("""
-            INSERT INTO lut (reg, run, token, hash_value, token_length, frequency, last_updated)
-            VALUES (?, ?, ?, ?, ?, 1, current_timestamp)
+            INSERT INTO lut (reg, run, token, hash_value, token_length, frequency)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (reg, run, token) 
             DO UPDATE SET 
-                frequency = lut.frequency + 1,
+                frequency = frequency + 1,
                 last_updated = excluded.last_updated
         """, batch_data)
         
-        print(f"Merged {len(batch_data)} token entries into persistent LUT")
+        print(f"Saved {len(batch_data)} token entries to LUT")
     
     def get_tokens_by_hll_pairs(self, hll_pairs: Set[Tuple[int, int]]) -> Dict[Tuple[int, int], List[str]]:
-        """
-        Batch retrieval: get all tokens for multiple (reg, run) pairs.
-        Critical for unambiguation step.
-        """
+        """Batch retrieval: get all tokens for multiple (reg, run) pairs"""
         if not hll_pairs:
             return {}
         
-        # Convert to list for SQL IN clause
         pairs_list = list(hll_pairs)
         
-        # Create temporary table for efficient join
         self.conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_pairs (reg INTEGER, run INTEGER)")
         self.conn.execute("DELETE FROM temp_pairs")
         self.conn.executemany("INSERT INTO temp_pairs VALUES (?, ?)", pairs_list)
@@ -96,66 +90,65 @@ class PersistentLookupTable:
             ORDER BY l.reg, l.run, l.frequency DESC
         """).fetchall()
         
-        # Group by (reg, run)
         tokens_by_pair = defaultdict(list)
         for reg, run, token, freq in result:
             tokens_by_pair[(reg, run)].append(token)
         
         return dict(tokens_by_pair)
     
-    def get_tokens_by_hll(self, reg: int, run: int) -> List[str]:
-        """Get tokens for single (reg, run) pair, ordered by frequency"""
+    def get_stats(self) -> Dict:
+        """Get LUT statistics"""
+        stats = {}
+        
+        result = self.conn.execute("SELECT COUNT(*) FROM lut").fetchone()
+        stats['total_entries'] = result[0] if result else 0
+        
+        result = self.conn.execute(
+            "SELECT COUNT(DISTINCT reg || ',' || run) FROM lut"
+        ).fetchone()
+        stats['unique_pairs'] = result[0] if result else 0
+        
         result = self.conn.execute("""
-            SELECT token FROM lut 
-            WHERE reg = ? AND run = ?
-            ORDER BY frequency DESC
-        """, (reg, run)).fetchall()
-        return [row[0] for row in result]
-    
-    def get_hll_pair(self, token: str) -> Optional[Tuple[int, int]]:
-        """Get HLL pair for a token"""
-        result = self.conn.execute("""
-            SELECT reg, run FROM lut WHERE token = ? LIMIT 1
-        """, (token,)).fetchone()
-        return tuple(result) if result else None
-    
-    def get_collisions_stats(self) -> List[Tuple[int, int, int]]:
-        """Get collision statistics: (reg, run, token_count)"""
-        result = self.conn.execute("""
-            SELECT reg, run, COUNT(*) as cnt
-            FROM lut
-            GROUP BY reg, run
-            HAVING cnt > 1
-            ORDER BY cnt DESC
-        """).fetchall()
-        return result
+            SELECT COUNT(*) FROM (
+                SELECT reg, run FROM lut GROUP BY reg, run HAVING COUNT(*) > 1
+            )
+        """).fetchone()
+        stats['collision_count'] = result[0] if result else 0
+        
+        return stats
     
     def export_to_parquet(self, path: str):
         """Export LUT to Parquet for archival"""
         self.conn.execute(f"COPY lut TO '{path}' (FORMAT PARQUET)")
     
     def vacuum(self):
-        """Optimize database after many merges"""
+        """Optimize database"""
         self.conn.execute("VACUUM")
     
     def close(self):
         self.conn.close()
 
-class PersistentAdjacencyMatrix:
 
-    """
-    Sparse adjacency matrix storage with incremental merge support.
-    Uses PyTorch sparse format + Zstd compression.
-    """
+class PersistentAdjacencyMatrix:
+    """Sparse adjacency matrix storage with Zstd compression"""
     
     def __init__(self, base_path: str):
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
         self.adj_path = self.base_path / "adj_matrix.pt.zst"
-        self.tok_id_path = self.base_path / "tok_id.pkl.zst"
+        self.tok_id_path = self.base_path / "token_to_idx.pkl.zst"
     
-    def save(self, adj: torch.Tensor, tok_id: Dict[str, int]):
-        """Save adjacency matrix and token mapping with compression"""
+    def save_from_state(self, corpus_state: CorpusState):
+        """
+        Save adjacency matrix from CorpusState.
+        Simplified: just save the current state's adjacency.
+        """
+        adj, token_to_idx = corpus_state.get_adjacency_matrix()
+        
+        if adj.shape[0] == 0:
+            print("No adjacency matrix to save")
+            return
+        
         # Coalesce and prepare data
         adj = adj.coalesce()
         data = {
@@ -172,7 +165,7 @@ class PersistentAdjacencyMatrix:
             f.write(compressed)
         
         # Compress and save token mapping
-        tok_serialized = pickle.dumps(tok_id)
+        tok_serialized = pickle.dumps(token_to_idx)
         tok_compressed = zstd.compress(tok_serialized, level=3)
         with open(self.tok_id_path, 'wb') as f:
             f.write(tok_compressed)
@@ -206,262 +199,206 @@ class PersistentAdjacencyMatrix:
         print(f"Loaded AM: {adj.shape}, {adj._nnz()} edges")
         
         return adj, tok_id
+
+
+class HLLSetArchive:
+    """Archive for storing HLLSets (one per text)"""
     
-    def merge_from_memory(self, memory_adj: torch.Tensor, memory_tok_id: Dict[str, int]):
-        """
-        Merge in-memory adjacency matrix with persistent storage.
-        
-        Strategy:
-        1. Load existing AM and tok_id
-        2. Align token IDs (create unified mapping)
-        3. Merge edge weights (sum frequencies)
-        4. Save merged result
-        """
-        # Load existing data
-        existing_adj, existing_tok_id = self.load()
-        
-        if existing_adj is None:
-            # First save, no merge needed
-            self.save(memory_adj, memory_tok_id)
+    def __init__(self, base_path: str):
+        self.base_path = Path(base_path)
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        self.hllsets_path = self.base_path / "hllsets.pkl.zst"
+    
+    def save_from_state(self, corpus_state: CorpusState):
+        """Save all HLLSets from CorpusState"""
+        if not corpus_state.hllsets:
+            print("No HLLSets to save")
             return
         
-        print("Merging adjacency matrices...")
+        # Serialize HLLSets
+        # Note: HllSet needs to be serializable (Julia objects may need special handling)
+        hllsets_data = {
+            'count': len(corpus_state.hllsets),
+            'P': corpus_state.P,
+            # Store HLL counts arrays instead of full Julia objects
+            'hll_counts': [hll.hll.counts for hll in corpus_state.hllsets]
+        }
         
-        # Create unified token mapping
-        unified_tok_id = existing_tok_id.copy()
-        next_id = len(unified_tok_id)
+        serialized = pickle.dumps(hllsets_data)
+        compressed = zstd.compress(serialized, level=3)
         
-        # Map new tokens to unified IDs
-        memory_to_unified = {}
-        for token, mem_id in memory_tok_id.items():
-            if token in unified_tok_id:
-                memory_to_unified[mem_id] = unified_tok_id[token]
-            else:
-                unified_tok_id[token] = next_id
-                memory_to_unified[mem_id] = next_id
-                next_id += 1
+        with open(self.hllsets_path, 'wb') as f:
+            f.write(compressed)
         
-        # Remap memory adjacency indices to unified IDs
-        memory_adj = memory_adj.coalesce()
-        mem_indices = memory_adj.indices()
-        mem_values = memory_adj.values()
+        print(f"Saved {len(corpus_state.hllsets)} HLLSets, "
+              f"compressed to {len(compressed) / 1024:.1f} KB")
+    
+    def load(self, P: int = 10) -> Optional[List[HllSet]]:
+        """Load HLLSets and reconstruct them"""
+        if not self.hllsets_path.exists():
+            return None
         
-        remapped_indices = torch.stack([
-            torch.tensor([memory_to_unified[idx.item()] for idx in mem_indices[0]]),
-            torch.tensor([memory_to_unified[idx.item()] for idx in mem_indices[1]])
-        ])
+        with open(self.hllsets_path, 'rb') as f:
+            compressed = f.read()
         
-        # Combine existing and new adjacencies
-        existing_adj = existing_adj.coalesce()
+        decompressed = zstd.decompress(compressed)
+        data = pickle.loads(decompressed)
         
-        combined_indices = torch.cat([existing_adj.indices(), remapped_indices], dim=1)
-        combined_values = torch.cat([existing_adj.values(), mem_values])
+        # Reconstruct HLLSets from counts
+        hllsets = []
+        for counts in data['hll_counts']:
+            hll = HllSet(P=data['P'])
+            # Restore counts (this may need Julia interop)
+            hll.counts = counts
+            hllsets.append(hll)
         
-        # Create merged sparse tensor and coalesce to sum duplicate edges
-        merged_size = (len(unified_tok_id), len(unified_tok_id))
-        merged_adj = torch.sparse_coo_tensor(
-            indices=combined_indices,
-            values=combined_values,
-            size=merged_size
-        ).coalesce()
+        print(f"Loaded {len(hllsets)} HLLSets")
         
-        # Save merged result
-        self.save(merged_adj, unified_tok_id)
-        
-        print(f"Merge complete: {len(unified_tok_id)} tokens, {merged_adj._nnz()} edges")
+        return hllsets
 
-class CorpusStateManager:
+
+class PersistenceManager:
     """
-    High-level manager for corpus state persistence and retrieval.
-    Handles both LUT and AM, optimized for real-time SGS.ai processing.
+    Simplified persistence manager for SGS.ai iterations.
+    
+    Usage after each iteration:
+        pm = PersistenceManager("./sgs_state")
+        pm.save(corpus_state)
+        
+    Usage for restoration:
+        pm = PersistenceManager("./sgs_state")
+        corpus_state = pm.load()
     """
     
-    def __init__(self, storage_dir: str = "./corpus_state"):
+    def __init__(self, storage_dir: str = "./sgs_state"):
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         
         self.lut = PersistentLookupTable(str(self.storage_dir / "lut.duckdb"))
         self.am = PersistentAdjacencyMatrix(str(self.storage_dir))
+        self.hllsets = HLLSetArchive(str(self.storage_dir))
     
-    def ingest_and_merge(self, corpus: List[str], hll: HllSet):
+    def save(self, corpus_state: CorpusState):
         """
-        Ingest new corpus in memory, then merge with persistent storage.
-        This is called after each new data arrival in SGS.ai.
+        Save complete corpus state after iteration.
+        This is the only method you need to call!
         """
-        print("\n=== Ingesting new corpus ===")
+        print("\n=== Saving corpus state ===")
         
-        # Process in memory (fast)
-        memory_adj, memory_tok_id, memory_lut = ingest_corpus(corpus, hll)
+        # Save LUT
+        self.lut.save_from_state(corpus_state)
         
-        print(f"Memory: {len(memory_tok_id)} tokens, {memory_adj._nnz()} edges")
+        # Save adjacency matrix
+        self.am.save_from_state(corpus_state)
         
-        # Merge into persistent storage
-        print("\n=== Merging with persistent storage ===")
-        self.lut.merge_from_memory(memory_lut)
-        self.am.merge_from_memory(memory_adj, memory_tok_id)
+        # Save HLLSets
+        self.hllsets.save_from_state(corpus_state)
         
-        print("Merge complete!\n")
+        # Save metadata
+        self._save_metadata(corpus_state)
+        
+        print("Save complete!\n")
     
-    def retrieve_for_restoration(self, hllset: HllSet) -> Tuple[torch.Tensor, Dict[str, int], Dict[Tuple[int, int], List[str]]]:
+    def load(self, P: int = 10) -> Optional[CorpusState]:
         """
-        Retrieve data needed for HLLSet → text restoration.
-        
-        Steps:
-        1. Extract (reg, run) pairs from HLLSet
-        2. Batch retrieve tokens from LUT
-        3. Unambiguate tokens
-        4. Load and prune AM to relevant tokens
+        Load complete corpus state for restoration.
         
         Returns:
-            pruned_adj: Adjacency matrix with only relevant tokens
-            pruned_tok_id: Token ID mapping for pruned matrix
-            tokens_by_pair: Token candidates for each (reg, run) pair
+            CorpusState or None if no saved state exists
         """
-        print("\n=== Retrieving data for restoration ===")
+        print("\n=== Loading corpus state ===")
         
-        # Extract HLLSet pairs (this happens in memory, very fast)
-        hll_pairs = self._extract_hll_pairs(hllset)
-        print(f"HLLSet contains {len(hll_pairs)} unique (reg, run) pairs")
+        # Check if state exists
+        metadata = self._load_metadata()
+        if metadata is None:
+            print("No saved state found")
+            return None
         
-        # Batch retrieve tokens from LUT
-        tokens_by_pair = self.lut.get_tokens_by_hll_pairs(hll_pairs)
-        print(f"Retrieved token candidates for {len(tokens_by_pair)} pairs")
+        # Create new CorpusState
+        corpus_state = CorpusState(P=metadata['P'])
         
-        # Load full AM and tok_id
-        full_adj, full_tok_id = self.am.load()
+        # Load adjacency matrix
+        adj, token_to_idx = self.am.load()
+        if adj is not None:
+            corpus_state.token_to_idx = token_to_idx
+            # Rebuild edge_freq from adjacency matrix
+            corpus_state.edge_freq = self._rebuild_edge_freq(adj, token_to_idx)
         
-        if full_adj is None:
-            raise ValueError("No adjacency matrix found in storage")
+        # Load HLLSets
+        hllsets = self.hllsets.load(P=metadata['P'])
+        if hllsets is not None:
+            corpus_state.hllsets = hllsets
         
-        # Unambiguate and get relevant tokens
-        disambiguated_tokens = self._unambiguate(tokens_by_pair, hll_pairs)
-        print(f"Disambiguated to {len(disambiguated_tokens)} tokens")
+        # Note: LUT is loaded on-demand from DuckDB, no need to load into memory
         
-        # Prune AM to only relevant tokens
-        pruned_adj, pruned_tok_id = self._prune_adjacency(
-            full_adj, full_tok_id, disambiguated_tokens
-        )
-        print(f"Pruned AM: {pruned_adj._nnz()} edges, {len(pruned_tok_id)} nodes")
+        print(f"Loaded state: {len(corpus_state.hllsets)} texts, "
+              f"{len(corpus_state.token_to_idx)} tokens")
+        print("Load complete!\n")
         
-        return pruned_adj, pruned_tok_id, tokens_by_pair
+        return corpus_state
     
-    def _extract_hll_pairs(self, hllset: HllSet) -> Set[Tuple[int, int]]:
-        """Extract all (reg, run) pairs from HLLSet"""
-        pairs = set()
+    def _save_metadata(self, corpus_state: CorpusState):
+        """Save corpus state metadata"""
+        metadata = {
+            'P': corpus_state.P,
+            'total_texts': len(corpus_state.hllsets),
+            'total_tokens': len(corpus_state.token_to_idx),
+            'total_edges': len(corpus_state.edge_freq),
+            'master_hll_cardinality': corpus_state.master_hll.count()
+        }
         
-        # Access Julia HLL counts
-        counts = hllset.hll.counts
-        
-        for reg in range(len(counts)):
-            bits = int(counts[reg])
-            if bits == 0:
-                continue
-            
-            # Extract run positions from bits
-            for run in range(32):
-                if bits & (1 << run):
-                    pairs.add((reg, run + 1))  # run is 1-indexed
-        
-        return pairs
+        with open(self.storage_dir / "metadata.json", 'w') as f:
+            import json
+            json.dump(metadata, f, indent=2)
     
-    def _unambiguate(self, tokens_by_pair: Dict[Tuple[int, int], List[str]], 
-                     hll_pairs: Set[Tuple[int, int]]) -> Set[str]:
-        """
-        Unambiguate tokens using n-gram decomposition intersection.
+    def _load_metadata(self) -> Optional[Dict]:
+        """Load corpus state metadata"""
+        metadata_path = self.storage_dir / "metadata.json"
+        if not metadata_path.exists():
+            return None
         
-        T_1 ∩ T_2 ∩ T_3 approach
-        """
-        # Separate by n-gram length
-        tokens_1g = set()
-        tokens_2g = []
-        tokens_3g = []
-        
-        for pair in hll_pairs:
-            for token in tokens_by_pair.get(pair, []):
-                if len(token) == 1:
-                    tokens_1g.add(token)
-                elif len(token) == 2:
-                    tokens_2g.append(token)
-                elif len(token) == 3:
-                    tokens_3g.append(token)
-        
-        # Decompose n-grams
-        T_1 = tokens_1g
-        T_2 = set()
-        for bigram in tokens_2g:
-            T_2.update(bigram)
-        
-        T_3 = set()
-        for trigram in tokens_3g:
-            T_3.update(trigram)
-        
-        # Intersection
-        if T_2 and T_3:
-            disambiguated_1g = T_1 & T_2 & T_3
-        elif T_2:
-            disambiguated_1g = T_1 & T_2
-        else:
-            disambiguated_1g = T_1
-        
-        # Include valid n-grams composed of disambiguated 1-grams
-        result = set(disambiguated_1g)
-        
-        for bigram in tokens_2g:
-            if all(c in disambiguated_1g for c in bigram):
-                result.add(bigram)
-        
-        for trigram in tokens_3g:
-            if all(c in disambiguated_1g for c in trigram):
-                result.add(trigram)
-        
-        # Always include special tokens
-        result.add("⊢")
-        result.add("⊣")
-        
-        return result
+        with open(metadata_path, 'r') as f:
+            import json
+            return json.load(f)
     
-    def _prune_adjacency(self, full_adj: torch.Tensor, full_tok_id: Dict[str, int], 
-                        keep_tokens: Set[str]) -> Tuple[torch.Tensor, Dict[str, int]]:
-        """Prune adjacency matrix to only keep specified tokens"""
-        keep_ids = {full_tok_id[tok] for tok in keep_tokens if tok in full_tok_id}
+    def _rebuild_edge_freq(self, adj: torch.Tensor, 
+                          token_to_idx: Dict[str, int]) -> Dict[Tuple[int, int], int]:
+        """Rebuild edge_freq from adjacency matrix"""
+        edge_freq = defaultdict(int)
         
-        if not keep_ids:
-            return torch.sparse_coo_tensor(size=(0, 0)), {}
+        adj = adj.coalesce()
+        indices = adj.indices()
+        values = adj.values()
         
-        # Create new compact ID mapping
-        keep_list = sorted(keep_ids)
-        old_to_new = {old_id: new_id for new_id, old_id in enumerate(keep_list)}
+        for i in range(indices.shape[1]):
+            u = indices[0, i].item()
+            v = indices[1, i].item()
+            freq = int(values[i].item())
+            edge_freq[(u, v)] = freq
         
-        pruned_tok_id = {tok: old_to_new[old_id] 
-                        for tok, old_id in full_tok_id.items() 
-                        if old_id in keep_ids}
+        return dict(edge_freq)
+    
+    def get_stats(self) -> Dict:
+        """Get storage statistics"""
+        stats = {}
         
-        # Filter and remap edges
-        full_adj = full_adj.coalesce()
-        indices = full_adj.indices()
-        values = full_adj.values()
+        # LUT stats
+        stats['lut'] = self.lut.get_stats()
         
-        mask = torch.tensor([
-            u.item() in keep_ids and v.item() in keep_ids
-            for u, v in zip(indices[0], indices[1])
-        ])
+        # File sizes
+        if self.am.adj_path.exists():
+            stats['adj_size_kb'] = self.am.adj_path.stat().st_size / 1024
+        if self.am.tok_id_path.exists():
+            stats['tok_id_size_kb'] = self.am.tok_id_path.stat().st_size / 1024
+        if self.hllsets.hllsets_path.exists():
+            stats['hllsets_size_kb'] = self.hllsets.hllsets_path.stat().st_size / 1024
         
-        filtered_indices = indices[:, mask]
-        filtered_values = values[mask]
+        # Metadata
+        metadata = self._load_metadata()
+        if metadata:
+            stats['metadata'] = metadata
         
-        # Remap to compact IDs
-        remapped_indices = torch.stack([
-            torch.tensor([old_to_new[idx.item()] for idx in filtered_indices[0]]),
-            torch.tensor([old_to_new[idx.item()] for idx in filtered_indices[1]])
-        ])
-        
-        pruned_adj = torch.sparse_coo_tensor(
-            indices=remapped_indices,
-            values=filtered_values,
-            size=(len(keep_ids), len(keep_ids))
-        ).coalesce()
-        
-        return pruned_adj, pruned_tok_id
+        return stats
     
     def close(self):
         """Close all connections"""

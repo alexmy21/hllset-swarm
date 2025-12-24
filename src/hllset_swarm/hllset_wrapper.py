@@ -3,7 +3,9 @@ HllSet Wrapper for Julia HllSets integration.
 Provides BSS_τ (coverage) and BSS_ρ (exclusion) metrics for set operations.
 """
 
-from julia import Main
+from julia import Main, Julia
+# Julia.install()
+
 import os
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
