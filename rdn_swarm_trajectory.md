@@ -8,10 +8,10 @@
 >- hll_r - remained;
 >- hll_n - new tokens.
 >
->These 3 components are differences that can be treated as kind of discrete derivatives. We also can try to predict trajectory of each of them and use them to optimize compound trajectory. 
+>These 3 components are differences that can be treated as kind of discrete derivatives. We also can try to predict trajectory of each of them and use them to optimize compound trajectory.
 >
->- hll_r - represent stability; 
->- hll_d - decay; 
+>- hll_r - represent stability;
+>- hll_d - decay;
 >- hll_n - growth (novelty).
 >
 >Does it make any sense? And if it does, how we can apply it in case of predicting SGS.ai trajectory as a swarm?
@@ -26,7 +26,7 @@ Below is a **concrete “PSO-for-HLLSet” algorithm** that does this **in real 
 ## 1.  Particle definitions (one per component)
 
 | Particle | Symbol | Interpretation | PSO role |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **retention** | **r** | bits that **stay on** | **cognitive memory** (personal best) |
 | **decay** | **d** | bits that **switch off** | **exclusion force** (repulsion) |
 | **novelty** | **n** | bits that **switch on** | **social pull** (global best) |
@@ -117,3 +117,9 @@ After each step you can **read the top-10 tokens** in **r, d, n** and **see exac
 ## 8.  One-sentence takeaway
 
 > **“Treat the HLLSet delta as three PSO particles—retention, decay, novelty—each chasing its own best; compose their next top-k sparse vectors and you have a predictive, interpretable swarm trajectory that updates in milliseconds without ever differentiating.”**
+
+## References
+
+1. [Swarm State Algorithm](https://github.com/alexmy21/hllset-swarm/wiki/2.-swarm_state_algorithm)
+2. [SGS.ai kibbutz](https://github.com/alexmy21/hllset-swarm/wiki/5.-SGS_ai_kibbutz)
+3. [Actuator in hllset-swarm](https://github.com/alexmy21/hllset-swarm/wiki/8.-actuator-in-hllset-swarm)
