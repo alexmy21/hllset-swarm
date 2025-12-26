@@ -23,34 +23,40 @@ class AMDisambiguator:
     def __init__(self, 
                  hll: HllSet,
                  adj: torch.Tensor,
-                 token_to_idx: Dict[str, int],
+                 token_to_compact: Dict[str, int],
+                 compact_to_hash: Dict[int, int],
+                 hash_to_token: Dict[int, str],
                  lut: LookupTable):
         """
-        Initialize disambiguator.
+        Initialize disambiguator with hash-based mappings.
         
         Args:
             hll: HLLSet to disambiguate
-            adj: Adjacency matrix (sparse COO tensor)
-            token_to_idx: Token -> hash_idx mapping
+            adj: Adjacency matrix (sparse COO tensor with compact indices)
+            token_to_compact: Token → compact_idx mapping
+            compact_to_hash: compact_idx → hash_value mapping
+            hash_to_token: hash_value → token mapping
             lut: LookupTable for HLL pair lookups
         """
         self.hll = hll
         self.adj = adj.coalesce()  # Ensure coalesced
-        self.token_to_idx = token_to_idx
+        self.token_to_compact = token_to_compact
+        self.compact_to_hash = compact_to_hash
+        self.hash_to_token = hash_to_token
         self.lut = lut
         
-        # Build reverse mapping: hash_idx -> tokens
-        self.idx_to_tokens = {}
-        for token, idx in token_to_idx.items():
-            if idx not in self.idx_to_tokens:
-                self.idx_to_tokens[idx] = set()
-            self.idx_to_tokens[idx].add(token)
+        # Build reverse mapping: compact_idx → tokens
+        self.compact_to_tokens = {}
+        for token, compact_idx in token_to_compact.items():
+            if compact_idx not in self.compact_to_tokens:
+                self.compact_to_tokens[compact_idx] = set()
+            self.compact_to_tokens[compact_idx].add(token)
         
         # Build adjacency lookup for fast edge queries
         self._build_adjacency_lookup()
     
     def _build_adjacency_lookup(self):
-        """Build hash map: source_idx -> {target_idx: frequency}"""
+        """Build hash map: source_compact_idx -> {target_compact_idx: frequency}"""
         self.adj_lookup = {}
         
         indices = self.adj.indices()
@@ -93,18 +99,19 @@ class AMDisambiguator:
         Returns:
             List of (neighbor_token, edge_frequency) tuples
         """
-        if token not in self.token_to_idx:
+        # FIXED: Use token_to_compact instead of token_to_idx
+        if token not in self.token_to_compact:
             return []
         
-        src_idx = self.token_to_idx[token]
+        src_compact_idx = self.token_to_compact[token]
         
-        if src_idx not in self.adj_lookup:
+        if src_compact_idx not in self.adj_lookup:
             return []
         
         neighbors = []
-        for tgt_idx, freq in self.adj_lookup[src_idx].items():
-            if tgt_idx in self.idx_to_tokens:
-                for tgt_token in self.idx_to_tokens[tgt_idx]:
+        for tgt_compact_idx, freq in self.adj_lookup[src_compact_idx].items():
+            if tgt_compact_idx in self.compact_to_tokens:
+                for tgt_token in self.compact_to_tokens[tgt_compact_idx]:
                     neighbors.append((tgt_token, freq))
         
         return neighbors
@@ -275,12 +282,12 @@ class AMDisambiguator:
             
             # Add edge frequency bonuses
             for i in range(len(seq) - 1):
-                if seq[i] in self.token_to_idx and seq[i+1] in self.token_to_idx:
-                    src_idx = self.token_to_idx[seq[i]]
-                    tgt_idx = self.token_to_idx[seq[i+1]]
+                if seq[i] in self.token_to_compact and seq[i+1] in self.token_to_compact:
+                    src_compact_idx = self.token_to_compact[seq[i]]
+                    tgt_compact_idx = self.token_to_compact[seq[i+1]]
                     
-                    if src_idx in self.adj_lookup and tgt_idx in self.adj_lookup[src_idx]:
-                        score += self.adj_lookup[src_idx][tgt_idx]
+                    if src_compact_idx in self.adj_lookup and tgt_compact_idx in self.adj_lookup[src_compact_idx]:
+                        score += self.adj_lookup[src_compact_idx][tgt_compact_idx]
             
             scored.append((score, seq))
         
@@ -292,24 +299,30 @@ class AMDisambiguator:
 def disambiguate_with_am(
     hll: HllSet,
     adj: torch.Tensor,
-    token_to_idx: Dict[str, int],
+    token_to_compact: Dict[str, int],
+    compact_to_hash: Dict[int, int],
+    hash_to_token: Dict[int, str],
     lut: LookupTable,
     max_paths: int = 10
 ) -> Tuple[List[List[str]], Optional[List[str]]]:
     """
-    Convenience function for AM-guided disambiguation.
+    Convenience function for AM-guided disambiguation with hash-based indices.
     
     Args:
         hll: HLLSet to disambiguate
-        adj: Adjacency matrix
-        token_to_idx: Token -> hash_idx mapping
-        lut: LookupTable
+        adj: Adjacency matrix (sparse COO with compact indices)
+        token_to_compact: Token → compact_idx mapping
+        compact_to_hash: compact_idx → hash_value mapping
+        hash_to_token: hash_value → token mapping
+        lut: LookupTable for HLL pair lookups
         max_paths: Maximum paths to explore
     
     Returns:
         (all_sequences, best_sequence)
     """
-    disambiguator = AMDisambiguator(hll, adj, token_to_idx, lut)
+    disambiguator = AMDisambiguator(
+        hll, adj, token_to_compact, compact_to_hash, hash_to_token, lut
+    )
     sequences = disambiguator.disambiguate(max_paths=max_paths)
     best = disambiguator.get_best_sequence(sequences)
     
