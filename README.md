@@ -366,3 +366,5 @@ MIT – see [LICENSE](LICENSE).
 18. [LETS Forecast](https://namburisrinath.medium.com/lets-forecast-learning-embedology-for-time-series-forecasting-6036891d05ae)
 19. [RF-DETR Transformer ](https://medium.com/@aedelon/yolo-is-dead-welcome-rf-detr-the-transformer-that-just-shattered-the-60-map-barrier-e814475d9f8c)
 20. [The Double Loss: Why We Can’t Fully Explain Minds or Machines](https://medium.com/@mbonsign/the-double-loss-why-we-cant-fully-explain-minds-or-machines-40df329cb968)
+21. [Spectral Graph Theory](https://isamu-website.medium.com/understanding-spectral-graph-theory-and-then-the-current-sota-of-gnns-e65caf363dbc)
+22. [Graph signal processing ](https://web.media.mit.edu/~xdong/talk/BDI_GSP.pdf)
